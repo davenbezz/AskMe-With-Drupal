@@ -1,0 +1,524 @@
+<?php
+
+/**
+ * @file
+ * Tests for answers.module.
+ */
+
+/**
+ * Tests the functionality of the answers module.
+ */
+class AnswersTestCase extends DrupalWebTestCase {
+
+  /**
+   * Default user for ansers tests.
+   *
+   * @var User
+   */
+  protected $answersUser;
+
+  /**
+   * Test getInfo.
+   */
+  public static function getInfo() {
+    return array(
+      'name' => 'Answers',
+      'description' => 'Answers Tests',
+      'group' => 'Answers',
+    );
+  }
+
+  /**
+   * Enable modules and create users with specific permissions.
+   */
+  public function setUp() {
+    parent::setUp('answers');
+    $this->answersUser = $this->drupalCreateUser(array(
+      'administer content types',
+      'create question content',
+      'edit own question content',
+      'create answer content',
+      'edit own answer content',
+    ));
+  }
+
+  /**
+   * Check node labels.
+   */
+  public function testLabels() {
+
+    $langcode = LANGUAGE_NONE;
+
+    $this->drupalLogin($this->answersUser);
+
+    $this->drupalGet('node/add/question');
+    $this->assertResponse(200);
+    $this->assertTitle(t('Create Question | Drupal'), 'The title on the create answer_question page is "Create Question | Drupal".');
+
+    $this->assertRaw('<label for="edit-title">Question <span class="form-required" title="This field is required.">*</span></label>', 'The question title is Question');
+    $this->assertRaw('<label for="edit-body-und-0-value">Description ', 'The question body is Decription');
+
+    $this->assertFieldByName('title', '', 'The title field exists');
+    $this->assertFieldByName("body[$langcode][0][value]", '', 'The body field exists');
+
+    $question = array();
+    $question['title'] = 'Woodchucks';
+    $question["body[$langcode][0][value]"] = "How much wood could a woodchuck chuck?";
+
+    $this->drupalPost('node/add/question', $question, 'Ask Your Question');
+
+    $this->assertRaw('<div class="view-empty">
+      <p><em>No answers yet</em></p>
+    </div>', 'No Answers yet');
+
+    $this->assertLink('Post an Answer', 0, 'Answers Form link exists');
+    $this->clickLink('Post an Answer');
+
+    $this->assertNoRaw('<label for="edit-body-und-0-value">Body </label>', 'No answer body label');
+    $this->assertNoFieldByName('title', 'Answer', 'Title field is Answer');
+    $this->assertFieldByName("body[$langcode][0][value]", '', 'The body field exists');
+
+    $answer = array();
+    $answer['title'] = 'The Answer!';
+    $answer["body[$langcode][0][value]"] = "42 cords of wood.";
+
+    $this->drupalPost('node/add/answer/1', $answer, 'Post Your Answer', array(
+      'query' => array('destination' => 'node/1'),
+    ));
+
+    $this->assertRaw('<h2>The Answer!</h2>', '1st Answer exists');
+
+    $this->assertLink('Post an Answer', 0, 'Answers Form link exists');
+    $this->clickLink('Post an Answer');
+
+    $answer['title'] = 'Another Answer!';
+    $answer["body[$langcode][0][value]"] = "Woodchucks don't chuck wood.";
+
+    $this->drupalPost('node/add/answer/1', $answer, 'Post Your Answer', array(
+      'query' => array('destination' => 'node/1'),
+    ));
+
+    $this->assertLink('Post an Answer', 0, 'Answers Form link exists');
+    $this->assertRaw('<h2>The Answer!</h2>', '1st Answer exists');
+    $this->assertRaw('<h2>Another Answer!</h2>', '2st Answer exists');
+  }
+
+  /**
+   * Tests permissions for default roles.
+   */
+  public function testDefaultPermissions() {
+    $admin = $this->drupalCreateUser(array('administer permissions'));
+
+    $this->drupalLogin($admin);
+    $this->drupalGet('admin/people/permissions');
+
+    // Administrators.
+    $this->assertFieldChecked('edit-3-create-question-content', "Administrators role have create question.");
+    $this->assertFieldChecked('edit-3-edit-own-question-content', "Administrators role has edit own question.");
+    $this->assertFieldChecked('edit-3-edit-any-question-content', "Administrators role has edit any question.");
+    $this->assertFieldChecked('edit-3-delete-own-question-content', "Administrators role has delete own question.");
+    $this->assertFieldChecked('edit-3-delete-any-question-content', "Administrators role has delete any question.");
+    $this->assertFieldChecked('edit-3-create-answer-content', "Administrators role has create answer.");
+    $this->assertFieldChecked('edit-3-edit-own-answer-content', "Administrators role has edit own answer.");
+    $this->assertFieldChecked('edit-3-edit-any-question-content', "Administrators role has edit any answer.");
+    $this->assertFieldChecked('edit-3-delete-own-answer-content', "Administrators role has delete own answer.");
+    $this->assertFieldChecked('edit-3-delete-any-answer-content', "Administrators role has delete any answer.");
+  }
+
+  /**
+   * Tests authenticated users permissions.
+   */
+  public function testDefaultAccess() {
+
+    $langcode = LANGUAGE_NONE;
+
+    $this->drupalLogin($this->answersUser);
+
+    $this->drupalGet('node/add/question');
+    $question = array();
+    $question['title'] = 'Woodchucks';
+    $question["body[$langcode][0][value]"] = "How much wood could a woodchuck chuck?";
+
+    $this->drupalPost('node/add/question', $question, 'Ask Your Question');
+
+    $this->clickLink(t('Edit'));
+
+    $question = array();
+    $question['title'] = 'How much wood?';
+    $question["body[$langcode][0][value]"] = "How much wood could a woodchuck chuck, if a woodchuck could chuck wood?";
+
+    $this->drupalPost('node/1/edit', $question, 'Update Your Question');
+
+    $answer = array();
+    $answer['title'] = 'The Answer to everything!';
+    $answer["body[$langcode][0][value]"] = "Exactly 42 cords of wood.";
+
+    $this->drupalPost('node/add/answer/1', $answer, 'Post Your Answer');
+  }
+
+  /**
+   * Test add content overview with other types.
+   */
+  public function testAddContentOverview() {
+
+    $adminUser = $this->drupalCreateUser(array(
+      'administer content types',
+      'create question content',
+      'edit own question content',
+      'create answer content',
+      'edit own answer content',
+    ));
+    $this->drupalLogin($adminUser);
+
+    $this->drupalGet('node/add');
+
+    // $content_type = $this->drupalCreateContentType($settings);
+    $this->assertLink('Question');
+    $this->assertNoLink('Answer');
+  }
+
+  /**
+   * Tests body is required on answers_answer.
+   */
+  public function testAnswerWithNoBody() {
+    $langcode = LANGUAGE_NONE;
+
+    $user2 = $this->drupalCreateUser(array(
+      'administer content types',
+      'create question content',
+      'edit own question content',
+      'create answer content',
+      'edit own answer content',
+    ));
+
+    $this->drupalLogin($user2);
+
+    $this->drupalGet('node/add/question');
+    $question = array();
+    $question['title'] = 'Woodchucks';
+    $question["body[$langcode][0][value]"] = "How much wood could a woodchuck chuck?";
+
+    $this->drupalPost('node/add/question', $question, 'Ask Your Question');
+    $answer = array();
+    $answer["title"] = '';
+    $answer["body[$langcode][0][value]"] = "";
+
+    $this->drupalPost('node/add/answer/1', $answer, 'Post Your Answer');
+    $this->assertRaw('<div class="messages error">
+<h2 class="element-invisible">Error message</h2>
+Answer field is required.</div>', 'Body field is required');
+  }
+
+}
+
+/**
+ * Tests the functionality of the answers module views.
+ */
+class AnswersViewTestCase extends DrupalWebTestCase {
+
+  /**
+   * Test getInfo.
+   */
+  public static function getInfo() {
+    return array(
+      'name' => 'Answers Views',
+      'description' => 'Answers View Tests',
+      'group' => 'Answers',
+    );
+  }
+
+  /**
+   * Enable modules and create users with specific permissions.
+   */
+  public function setUp() {
+    parent::setUp('answers');
+
+  }
+
+  /**
+   * Test Qustions view page.
+   */
+  public function testQuestionsView() {
+    $langcode = LANGUAGE_NONE;
+    $answersUser = $this->drupalCreateUser(array(
+      'administer content types',
+      'create question content',
+      'edit own question content',
+      'create answer content',
+      'edit own answer content',
+    ));
+
+    $this->drupalLogin($answersUser);
+
+    $this->drupalGet('node/add/question');
+    $question = array();
+    $question['title'] = 'Woodchucks';
+    $question["body[$langcode][0][value]"] = "How much wood could a woodchuck chuck?";
+
+    $this->drupalPost('node/add/question', $question, 'Ask Your Question');
+
+    $answer = array();
+    $answer["body[$langcode][0][value]"] = "Exactly 42 cords of wood.";
+
+    $this->drupalPost('node/add/answer/1', $answer, 'Post Your Answer');
+
+    $this->drupalGet('node/add/question');
+    $question = array();
+    $question['title'] = 'Is it true?';
+    $question["body[$langcode][0][value]"] = "Is what they say about Woodchuck true?";
+
+    $this->drupalPost('node/add/question', $question, 'Ask Your Question');
+
+    $this->drupalGet('questions');
+    $this->assertLink('Is it true?');
+    $this->assertLink('Woodchucks');
+
+  }
+
+  /**
+   * Test Own Questions view page.
+   */
+  public function testOwnQuestionsView() {
+    $langcode = LANGUAGE_NONE;
+
+    $user2 = $this->drupalCreateUser(array(
+      'administer content types',
+      'create question content',
+      'edit own question content',
+      'create answer content',
+      'edit own answer content',
+      // 'view published content',
+    ));
+    $user3 = $this->drupalCreateUser(array(
+      'administer content types',
+      'create question content',
+      'edit own question content',
+      'create answer content',
+      'edit own answer content',
+      // 'view published content',
+    ));
+
+    $this->drupalLogin($user2);
+
+    $this->drupalGet('node/add/question');
+    $question = array();
+    $question['title'] = 'Woodchucks';
+    $question["body[$langcode][0][value]"] = "How much wood could a woodchuck chuck?";
+
+    $this->drupalPost('node/add/question', $question, 'Ask Your Question');
+
+    $this->drupalGet('node/add/question');
+    $question = array();
+    $question['title'] = 'Woodchucks are young werewolves?';
+    $question["body[$langcode][0][value]"] = "Are woodchuck really just werewolves in disguise?";
+
+    $this->drupalPost('node/add/question', $question, 'Ask Your Question');
+
+    $this->drupalLogout();
+    $this->drupalLogin($user3);
+
+    $this->drupalGet('node/1');
+    $answer = array();
+    $answer["body[$langcode][0][value]"] = "Exactly 42 cords of wood.";
+
+    $this->drupalPost('node/add/answer/1', $answer, 'Post Your Answer');
+
+    $this->drupalGet('node/add/question');
+    $question = array();
+    $question['title'] = 'Is it true?';
+    $question["body[$langcode][0][value]"] = "Is what they say about Woodchuck true?";
+
+    $this->drupalPost('node/add/question', $question, 'Ask Your Question');
+
+    $this->drupalGet('user/3/questions');
+    $this->assertNoLink('Woodchucks');
+    $this->assertNoLink('Woodchucks are young werewolves?');
+    $this->assertLink('Is it true?');
+
+    $this->drupalLogout();
+    $this->drupalLogin($user2);
+
+    $this->drupalGet('user/2/questions');
+
+    $this->assertLink('Woodchucks');
+    $this->assertLink('Woodchucks are young werewolves?');
+
+  }
+
+  /**
+   * Test Own Answers view page.
+   */
+  public function testOwnAnswersView() {
+    $langcode = LANGUAGE_NONE;
+
+    $user2 = $this->drupalCreateUser(array(
+      'administer content types',
+      'create question content',
+      'edit own question content',
+      'create answer content',
+      'edit own answer content',
+    ));
+    $user3 = $this->drupalCreateUser(array(
+      'administer content types',
+      'create question content',
+      'edit own question content',
+      'create answer content',
+      'edit own answer content',
+    ));
+
+    $this->drupalLogin($user2);
+
+    $this->drupalGet('node/add/question');
+    $question = array();
+    $question['title'] = 'Woodchucks';
+    $question["body[$langcode][0][value]"] = "How much wood could a woodchuck chuck?";
+
+    $this->drupalPost('node/add/question', $question, 'Ask Your Question');
+    $answer = array();
+    $answer['title'] = 'Not chuckers of wood';
+    $answer["body[$langcode][0][value]"] = "Woodchucks do not chuck wood.";
+
+    $this->drupalPost('node/add/answer/1', $answer, 'Post Your Answer');
+    $this->drupalGet('node/add/question');
+    $question = array();
+    $question['title'] = 'Woodchucks are young werewolves?';
+    $question["body[$langcode][0][value]"] = "Are woodchuck really just werewolves in disguise?";
+
+    $this->drupalPost('node/add/question', $question, 'Ask Your Question');
+
+    $this->drupalLogout();
+    $this->drupalLogin($user3);
+
+    $this->drupalGet('node/1');
+    $answer["body[$langcode][0][value]"] = "Exactly 42 cords of wood.";
+
+    $this->drupalPost('node/add/answer/1', $answer, 'Post Your Answer');
+
+    $this->drupalGet('node/add/question');
+    $question = array();
+    $question['title'] = 'Is it true?';
+    $question["body[$langcode][0][value]"] = "Is what they say about Woodchuck true?";
+
+    $this->drupalPost('node/add/question', $question, 'Ask Your Question');
+
+    $this->drupalGet('user/3/questions');
+    $this->assertNoLink('Woodchucks');
+    $this->assertLink('Is it true?');
+
+    $this->drupalLogout();
+    $this->drupalLogin($user2);
+
+    $this->drupalGet('node/5');
+    $this->drupalGet('node/add/answer/5');
+    $answer = array();
+    $answer["body[$langcode][0][value]"] = "Woodchucks are clearly smaller werewolves. They were sent to infiltrate and spy on our society until the invasion.";
+
+    $this->drupalPost('node/add/answer/5', $answer, 'Post Your Answer');
+
+    $this->drupalGet('user/2/questions/answered');
+
+    $this->assertLink('Woodchucks');
+    $this->assertNoLink('Woodchucks are young werewolves?');
+
+  }
+
+}
+
+/**
+ * Tests the functionality of the answers module views.
+ */
+class AnswersBrandingTestCase extends DrupalWebTestCase {
+
+  /**
+   * Test getInfo.
+   */
+  public static function getInfo() {
+    return array(
+      'name' => 'Answers Branding',
+      'description' => 'Tests custom Answers branding.',
+      'group' => 'Answers',
+    );
+  }
+
+  /**
+   * Enable modules and create users with specific permissions.
+   */
+  public function setUp() {
+    parent::setUp('answers');
+
+    variable_set('answers_question_create_button_text', 'Nointseuq Ruoy Ksa');
+    variable_get('answers_question_edit_button_text', 'Nointseuq Ruoy Etadpu');
+    variable_set('answers_trans_ucquestions', 'Snointseuq');
+    variable_set('answers_trans_lcquestions', 'snointseuq');
+    variable_set('answers_trans_ucquestion', 'Nointseuq');
+    variable_set('answers_trans_lcquestion', 'nointseuq');
+
+    variable_set('answers_answer_create_button_text', 'Rewsa Ruoy Tsop');
+    variable_set('answers_answer_edit_button_text', 'Rewsa Ruoy Etadpu');
+    variable_set('answers_trans_ucanswers', 'Srewsa');
+    variable_set('answers_trans_lcanswers', 'srewsa');
+    variable_set('answers_trans_ucanswer', 'Rewsa');
+    variable_set('answers_trans_lcanswer', 'rewsa');
+
+    answers_translation(TRUE);
+    // cache_clear_all();
+  }
+
+  /**
+   * Test Qustions view page.
+   */
+  public function testAddQuestions() {
+    $langcode = LANGUAGE_NONE;
+    $user2 = $this->drupalCreateUser(array(
+      'administer content types',
+      'create question content',
+      'edit own question content',
+      'create answer content',
+      'edit own answer content',
+    ));
+
+    $this->drupalLogin($user2);
+    $this->drupalGet('node/add/question');
+
+    $this->assertPattern(format_string('|<h1 class="title" id="page-title">
+          Create !Question        </h1>|', answers_translation()), 'Header contains Question.');
+    $this->assertPattern(format_string('|<label for="edit-title">!Question |', answers_translation()), 'Title label is Question.');
+    // @TODO - branding
+    // $this->assertPattern(
+    // format_string('|<label class="option"
+    // for="edit-field-notify-p-und">Notify on !Answer </label>|',
+    // answers_translation()),
+    // 'Notifiaction contains Answer'
+    // );
+    $this->assertFieldById('edit-submit', format_string('!answers_question_create_button_text', answers_translation()), format_string('The <em>Save</em> button text. - !answers_question_create_button_text', answers_translation()));
+
+    $question = array();
+    $question['title'] = 'Woodchucks';
+    $question["body[$langcode][0][value]"] = "How much wood could a woodchuck chuck?";
+
+    $this->drupalPost('node/add/question', $question, format_string('!answers_question_create_button_text', answers_translation()));
+
+    $this->drupalGet('questions');
+    $this->assertLink(format_string('!Question', answers_translation()));
+    $this->assertLink(format_string('!Answers', answers_translation()));
+
+    $this->drupalGet('/questions/unanswered');
+    $this->assertLink(format_string('!Question', answers_translation()));
+    $this->assertLink(format_string('!Answers', answers_translation()));
+
+    $this->drupalGet('/node/1');
+    // @TODO - branding
+    // $this->assertLink(format_string('Post an !Answer',
+    // answers_translation()));
+    $this->assertLink('Post an Answer');
+    $this->clickLink('Post an Answer');
+    $this->assertPattern(format_string('|<h1 class="title" id="page-title">
+          Create !Answer        </h1>|', answers_translation()), 'Header contains Anseer.');
+    $this->assertPattern(format_string('|<label for="edit-title">!Answer |', answers_translation()), 'Title label is Question.');
+    // @TODO - branding
+    // $this->assertLink('Post Your Answer');
+    $this->assertFieldById('edit-submit', format_string('!answers_answer_create_button_text', answers_translation()), format_string('The <em>Save</em> button text. - !answers_answer_create_button_text', answers_translation()));
+
+  }
+
+}
