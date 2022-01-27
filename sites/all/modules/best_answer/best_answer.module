@@ -1,0 +1,247 @@
+<?php
+/**
+ * @file
+ */
+
+include_once('best_answer.features.inc');
+
+
+ /**
+ * Implements hook_help().
+ */
+function best_answer_help($path, $arg) {
+  switch ($path) {
+    case "admin/help#modulename":
+      return '<p>' . t('Enables question authors to select a "best answer" to a question.') . '</p>';
+  }
+}
+
+/**
+ * Implements hook_node_view().
+ */
+function best_answer_node_view($node, $view_mode = 'full') {
+
+  global $user;
+  
+  $path = drupal_get_path('module', 'best_answer') . '/best_answer.css';
+  drupal_add_css($path);
+
+  if ($node->type == 'question') {
+ 
+    // If appropriate, select a best answer
+    $best_answer = isset($_GET['select_best_answer']) ? check_plain($_GET['select_best_answer']) : NULL;
+    if ($best_answer) {
+      _best_answer_select_best_answer($node, $best_answer);
+      drupal_goto('node/' . $node->nid);
+    }
+
+    // If appropriate, unselect a best answer
+    $best_answer = isset($_GET['unselect_best_answer']) ? check_plain($_GET['unselect_best_answer']) : NULL;
+    if ($best_answer) {
+      _best_answer_unselect_best_answer($node, $best_answer);
+      drupal_goto('node/' . $node->nid);
+    }
+  }
+
+  if ($node->type == 'answer') {
+
+    $question = answers_field_get_node_reference($node, 'field_answer_question');
+	$lang = field_language('node', $node, 'field_best_answer_p');
+    $best_answer_p = isset($node->field_best_answer_p[$lang][0]['value']) && $node->field_best_answer_p[$lang][0]['value'];
+
+    if ($user->uid == $question->uid) {
+      $query_name = $best_answer_p ? 'unselect_best_answer' : 'select_best_answer';
+      $redirect_path = url(
+       'node/' . $question->nid,   
+        array('absolute' => TRUE, 'query' => array($query_name => $node->nid))
+      );
+      $prefix = $best_answer_p ? '<a class="best-answer-unselect-answer" href=' . $redirect_path . ' title="Unselect As Best Answer">' : 
+	                             '<a class="best-answer-select-answer" href=' . $redirect_path . ' title="Select As Best Answer">';
+	}
+    else {
+      $prefix = $best_answer_p ? "<a class='best-answer-this-answer'>" :
+                                 "<a class='best-answer-not-this-answer'>";
+    }
+    $node->content['best_answer'] = array(
+      '#type' => 'item',
+      '#prefix' => $prefix,
+      '#suffix' => '</a>',
+      '#weight' => -20,
+    );
+  }
+}
+
+/**
+ * Unsets best answer and makes empties corresponding field on question node.
+ * @param object $question: node of the question being answered
+ * @param integer $answer_nid: nid for the "old" best answer which is to be unselected
+ */
+function _best_answer_unselect_best_answer($question, $answer_nid) {
+
+  // remove the flag on the old best answer node
+  best_answer_remove_flag($answer_nid);
+  
+  // if the $old_best_answer was set, update the question
+  $lang = field_language('node', $question, 'field_best_answer');
+  if (isset($question->field_best_answer[$lang]) 
+         && $answer_nid == $question->field_best_answer[$lang][0]['nid']) {
+ 
+    // update the question
+    unset($question->field_best_answer);
+    node_save($question);
+
+    // reset the question lock if needed
+    best_answer_reset_question_lock($question);
+ 
+    // trigger rule event 
+    if (module_exists('rules')&& ($answer_node = node_load($answer_nid))) {
+      rules_invoke_event('best_answer_unset', $question, $answer_node);
+    }
+  }
+  
+  else { // question does not have $old_best_answer selected as best
+    watchdog('best answer', 
+        'Answer was with %answer_nid was not set as best on the question node with id %quesion_nid.', 
+        array('%answer_nid' => $answer_nid, '%question_nid' => $question->nid,));
+  }
+}
+
+/**
+ * Set best answer flag to a new answer node. 
+ * Unsets old best answer, if one exists. 
+ * @param object $question: question being answered
+ * @param integer $answer_nid: nid for the new best answer node
+ */
+function _best_answer_select_best_answer($question, $answer_nid) {
+
+  // remove the flag on the old best answer node (if there is one)
+  $old_answer_nid = FALSE;
+  $lang = field_language('node', $question, 'field_best_answer');
+  if (isset($question->field_best_answer[$lang])) {
+    $old_answer_nid = $question->field_best_answer[$lang][0]['nid'];
+    _best_answer_unselect_best_answer($question, $old_answer_nid);
+  }
+
+  // update the question
+  $question->field_best_answer[$lang][0]['nid'] = $answer_nid;
+  node_save($question);
+
+  // lock the question if appropriate
+  if (variable_get('best_answer_lock_question_p', 0)) {
+    answers_lock_question($question);
+  }
+
+  // set the flag on the new best answer node
+  $answer = node_load($answer_nid);
+  $lang = field_language('node', $answer, 'field_best_answer_p');
+  $answer->field_best_answer_p[$lang][0]['value'] = 1;
+  node_save($answer);
+
+  // provide 'hook_best_answer_set' to allow other modules to catch the event
+  $old_answer = $old_answer_nid ? node_load($old_answer_nid) : FALSE;
+  module_invoke_all('best_answer_set', $question, $answer, $old_answer);
+
+  // if the rule module exist, trigger the rules events
+  if (module_exists('rules')) {
+    rules_invoke_event('best_answer_set', $question, $answer);
+  }
+}
+
+/**
+ * Sets field_best_answer_p from best answers module to zero
+ * @param integer $answer_nid
+ */
+function best_answer_remove_flag($answer_nid) {
+  $answer = node_load($answer_nid);
+  if ($answer) {
+    $lang = field_language('node', $answer, 'field_best_answer_p');
+    $answer->field_best_answer_p[$lang][0]['value'] = 0;
+    node_save($answer);   
+  }
+}
+
+/**
+ * Implement hook_form_alter
+ */
+function best_answer_form_alter(&$form, &$form_state, $form_id) {
+
+  switch ($form_id) {
+
+    // Update the administrative settings form to have settings for Best Answer
+    case 'answers_settings':
+
+      $form['best_answer_settings'] = array(
+        '#type'          => 'fieldset',
+        '#title'         => 'Best Answer Settings',
+        '#description'   => 'Question authors may select a "best answer" to their questions',
+        '#weight'        => 10,
+      );
+
+      $form['best_answer_settings']['best_answer_lock_question_p'] = array(
+        '#type'          => 'checkbox',
+        '#title'         => 'Lock questions after a "Best Answer" has been selected?',
+        '#description'   => 'If set, after a question author selects a "Best Answer", users will no longer be able to add new answers',
+        '#default_value' => variable_get('best_answer_lock_question_p', 0),
+      );
+
+      // store the old value of the 'best_answer_lock_question_p' variable
+      $form['best_answer_settings']['old_best_answer_lock_question_p'] = array(
+        '#type'          => 'value',
+        '#value'         => variable_get('best_answer_lock_question_p', 0),
+      );
+	  
+      // add in a submit handler *before* the standard handler
+      $form['#submit'][] = 'best_answer_settings_form_submit';
+
+      break;
+
+    // Update the question node editing form to hide the best answer fields
+    case 'question_node_form':
+
+      // Hide 'field_best_answer' (this is only used behind the scenes, not directly set by users)
+     $form['field_best_answer']['#prefix'] = '<div style="display: none;">';
+     $form['field_best_answer']['#suffix'] = '</div>';
+
+      break;
+
+    // Update the answer node editing form to hide the best answer fields
+    case 'answer_node_form':
+
+      // Hide 'field_best_answer' (this is only used behind the scenes, not directly set by users)
+      $form['field_best_answer_p']['#prefix'] = '<div style="display: none;">';
+      $form['field_best_answer_p']['#suffix'] = '</div>';
+
+      break;
+  }
+}
+
+function best_answer_settings_form_submit($form, &$form_state) {
+  $new = $form_state['values']['best_answer_lock_question_p'];
+  $old = $form_state['values']['old_best_answer_lock_question_p'];
+  if ($old != $new) {
+    drupal_set_message($new ? 'Questions that have best answers have been locked.' : 'Questions that have best answers have been unlocked (unless they are locked for another reason)');
+    answers_reset_question_locks();
+  }
+}
+
+function best_answer_answers_lock_question_p($question) {
+  $lang = field_language('node', $question, 'field_best_answer');
+
+  return (
+    variable_get('best_answer_lock_question_p', 0) && 
+    isset($question->field_best_answer[$lang][0]['nid']) && 
+    $question->field_best_answer[$lang][0]['nid']
+  ); 
+}
+
+// This function should get eliminated from here, moved to the 'answers' itself, and renamed 'answers_reset_question_lock'.
+function best_answer_reset_question_lock($question) {
+  $modules = module_implements('answers_lock_question_p');
+  if (answers_lock_question_p($question, $modules)) {
+    answers_lock_question($question);
+  }
+  else {
+    answers_unlock_question($question);
+  }
+}
+

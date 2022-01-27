@@ -1,0 +1,38 @@
+a.best-answer-select-answer  {
+  display: block;
+  width: 60px;
+  height: 55px;
+  text-indent:-9999px;
+  float: left;
+  background: url(graphics/select_button.png) no-repeat;
+  background-position: 0 0px;
+}
+
+a.best-answer-select-answer:hover{
+  background-position: 0 -60px;
+}
+
+a.best-answer-unselect-answer  {
+  width: 60px;
+  height: 55px;
+  float: left;
+  background: url(graphics/select_button.png) no-repeat;
+  background-position: 0 -110px;
+  border: 0;
+}
+
+a.best-answer-unselect-answer:hover{
+  background-position: 0 -170px;
+}
+
+a.best-answer-this-answer {
+  width: 60px;
+  height: 55px;
+  float: left;
+  background: url(graphics/select_button.png) no-repeat;
+  background-position: 0 -110px;
+  border: 0;
+ }
+
+a.best-answer-not-this-answer {
+ }
